@@ -1,0 +1,17 @@
+{
+  "name": "electronic-library-api",
+  "version": "1.0.0",
+  "description": "Серверное приложение «Электронная библиотека и каталог книг»",
+  "type": "module",
+  "main": "cmd/app/main.js",
+  "scripts": {
+    "start": "node cmd/app/main.js",
+    "dev": "node --watch cmd/app/main.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18.18"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

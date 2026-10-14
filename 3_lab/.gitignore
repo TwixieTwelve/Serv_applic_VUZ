@@ -1,0 +1,26 @@
+# Environment configuration
+.env
+.env.local
+.env.*.local
+
+# Dependencies & Build outputs
+node_modules/
+dist/
+build/
+bin/
+coverage/
+*.exe
+*.bin
+
+# Logs
+*.log
+npm-debug.log*
+
+# Python (на случай вспомогательных скриптов)
+__pycache__/
+.venv/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
