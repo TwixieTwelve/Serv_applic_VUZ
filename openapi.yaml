@@ -1,0 +1,1251 @@
+openapi: 3.0.3
+info:
+  title: Electronic Library API
+  description: |
+    Спецификация REST API для системы «Электронная библиотека и каталог книг»
+    (Лабораторная работа №2). API построено на основе ролевой модели, Use Cases
+    и ER-диаграммы из Лабораторной работы №1.
+
+    Роли:
+    * **reader** — читатель;
+    * **librarian** — библиотекарь.
+
+    Аутентификация — JWT-токен в заголовке `Authorization: Bearer <token>`.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Локальный сервер разработки
+
+tags:
+  - name: Auth
+    description: Регистрация, вход и профиль текущего пользователя
+  - name: Books
+    description: Электронный каталог книг
+  - name: Authors
+    description: Справочник авторов
+  - name: Copies
+    description: Физические экземпляры книг
+  - name: Reservations
+    description: Бронирование экземпляров
+  - name: Loans
+    description: Выдача и возврат книг
+  - name: Fines
+    description: Штрафы за просрочку возврата
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Регистрация нового читателя
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Учетная запись создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Пользователь с таким email уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: EMAIL_ALREADY_EXISTS
+                message: Пользователь с email ivanov@mail.ru уже зарегистрирован
+                timestamp: '2026-10-14T10:15:30Z'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Вход в систему и получение токена
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешный вход, выдан JWT-токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Неверный email или пароль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: INVALID_CREDENTIALS
+                message: Неверный email или пароль
+                timestamp: '2026-10-14T10:15:30Z'
+
+  /users/me:
+    get:
+      tags: [Auth]
+      summary: Профиль текущего пользователя
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Данные текущего пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /books:
+    get:
+      tags: [Books]
+      summary: Получение списка книг (каталог) с поиском и пагинацией
+      operationId: listBooks
+      security: []
+      parameters:
+        - name: search
+          in: query
+          description: Поиск по названию книги или фамилии автора
+          required: false
+          schema:
+            type: string
+            example: Мастер и Маргарита
+        - name: isbn
+          in: query
+          description: Точный поиск по ISBN
+          required: false
+          schema:
+            type: string
+            example: '978-5-17-090630-7'
+        - name: available
+          in: query
+          description: Только книги, у которых есть свободные экземпляры
+          required: false
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Books]
+      summary: Добавление книги в каталог
+      operationId: createBook
+      description: Доступно только библиотекарю.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookRequest'
+      responses:
+        '201':
+          description: Книга добавлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Книга с таким ISBN уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: ISBN_ALREADY_EXISTS
+                message: Книга с ISBN 978-5-17-090630-7 уже есть в каталоге
+                timestamp: '2026-10-14T10:15:30Z'
+
+  /books/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BookId'
+    get:
+      tags: [Books]
+      summary: Подробная информация о книге
+      operationId: getBook
+      security: []
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Books]
+      summary: Полное обновление данных книги
+      operationId: updateBook
+      description: Доступно только библиотекарю. Передаются все поля книги.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookRequest'
+      responses:
+        '200':
+          description: Книга обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Books]
+      summary: Удаление книги из каталога
+      operationId: deleteBook
+      description: |
+        Доступно только библиотекарю. Нельзя удалить книгу, у которой есть
+        выданные или забронированные экземпляры (409).
+      responses:
+        '204':
+          description: Книга удалена, тело ответа отсутствует
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /authors:
+    get:
+      tags: [Authors]
+      summary: Получение списка авторов
+      operationId: listAuthors
+      security: []
+      parameters:
+        - name: search
+          in: query
+          description: Поиск по имени или фамилии
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuthorResponse'
+    post:
+      tags: [Authors]
+      summary: Добавление автора в справочник
+      operationId: createAuthor
+      description: Доступно только библиотекарю.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorRequest'
+      responses:
+        '201':
+          description: Автор добавлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /books/{id}/copies:
+    parameters:
+      - $ref: '#/components/parameters/BookId'
+    get:
+      tags: [Copies]
+      summary: Список физических экземпляров книги
+      operationId: listCopies
+      parameters:
+        - name: status
+          in: query
+          description: Фильтр по статусу экземпляра
+          required: false
+          schema:
+            $ref: '#/components/schemas/CopyStatus'
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CopyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Copies]
+      summary: Регистрация нового физического экземпляра книги
+      operationId: createCopy
+      description: Доступно только библиотекарю.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopyRequest'
+      responses:
+        '201':
+          description: Экземпляр зарегистрирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CopyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Инвентарный номер уже занят
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: INVENTORY_NUMBER_EXISTS
+                message: Экземпляр с инвентарным номером INV-000123 уже существует
+                timestamp: '2026-10-14T10:15:30Z'
+
+  /copies/{id}:
+    parameters:
+      - $ref: '#/components/parameters/CopyId'
+    patch:
+      tags: [Copies]
+      summary: Изменение статуса экземпляра
+      operationId: updateCopyStatus
+      description: |
+        Доступно только библиотекарю. Частичное обновление — меняется только
+        поле status (например, экземпляр утерян или списан).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopyStatusUpdate'
+      responses:
+        '200':
+          description: Статус изменен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CopyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /reservations:
+    get:
+      tags: [Reservations]
+      summary: Список бронирований
+      operationId: listReservations
+      description: |
+        Читатель получает только свои бронирования, библиотекарь — все
+        бронирования (с возможностью фильтра по статусу).
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ReservationStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReservationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Reservations]
+      summary: Забронировать экземпляр книги
+      operationId: createReservation
+      description: Доступно читателю. Экземпляр должен иметь статус available.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationRequest'
+      responses:
+        '201':
+          description: Бронирование создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Экземпляр уже забронирован или выдан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: COPY_NOT_AVAILABLE
+                message: Экземпляр INV-000123 уже забронирован другим читателем
+                timestamp: '2026-10-14T10:15:30Z'
+
+  /reservations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ReservationId'
+    patch:
+      tags: [Reservations]
+      summary: Обработка бронирования (изменение статуса)
+      operationId: updateReservationStatus
+      description: Доступно только библиотекарю.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationStatusUpdate'
+      responses:
+        '200':
+          description: Статус бронирования изменен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Reservations]
+      summary: Отменить бронирование по ID
+      operationId: cancelReservation
+      description: Доступно владельцу бронирования или библиотекарю.
+      responses:
+        '204':
+          description: Бронирование отменено, тело ответа отсутствует
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /loans:
+    get:
+      tags: [Loans]
+      summary: Список выдач (текущих и прошлых)
+      operationId: listLoans
+      description: |
+        Читатель получает только свои выдачи, библиотекарь — все выдачи
+        (можно отфильтровать по читателю).
+      parameters:
+        - name: user_id
+          in: query
+          description: Фильтр по читателю (только для библиотекаря)
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: active
+          in: query
+          description: true — только невозвращенные книги
+          required: false
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LoanResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Loans]
+      summary: Оформление выдачи экземпляра читателю
+      operationId: createLoan
+      description: Доступно только библиотекарю.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanRequest'
+      responses:
+        '201':
+          description: Выдача оформлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Экземпляр уже выдан другому читателю
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: COPY_ALREADY_LOANED
+                message: Экземпляр INV-000123 уже находится на руках у читателя
+                timestamp: '2026-10-14T10:15:30Z'
+
+  /loans/{id}:
+    parameters:
+      - $ref: '#/components/parameters/LoanId'
+    patch:
+      tags: [Loans]
+      summary: Оформление возврата книги
+      operationId: returnLoan
+      description: |
+        Доступно только библиотекарю. Частичное обновление выдачи — заполняется
+        поле returned_at. Если книга возвращена позже due_at, сервер
+        автоматически создает штраф (fines).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanReturnRequest'
+      responses:
+        '200':
+          description: Возврат оформлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Книга по этой выдаче уже возвращена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: LOAN_ALREADY_RETURNED
+                message: Книга по выдаче 15 уже возвращена
+                timestamp: '2026-10-14T10:15:30Z'
+
+  /fines:
+    get:
+      tags: [Fines]
+      summary: Список штрафов
+      operationId: listFines
+      description: |
+        Читатель получает только свои штрафы, библиотекарь — все штрафы.
+      parameters:
+        - name: paid
+          in: query
+          description: true — оплаченные, false — неоплаченные
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Успешный запрос
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FineResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /fines/{id}:
+    parameters:
+      - $ref: '#/components/parameters/FineId'
+    patch:
+      tags: [Fines]
+      summary: Фиксация погашения штрафа
+      operationId: payFine
+      description: Доступно только библиотекарю. Заполняется поле paid_at.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinePaymentRequest'
+      responses:
+        '200':
+          description: Штраф отмечен как оплаченный
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FineResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    BookId:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор книги
+      schema:
+        type: integer
+        format: int64
+        example: 42
+    CopyId:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор экземпляра
+      schema:
+        type: integer
+        format: int64
+        example: 7
+    ReservationId:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор бронирования
+      schema:
+        type: integer
+        format: int64
+        example: 3
+    LoanId:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор выдачи
+      schema:
+        type: integer
+        format: int64
+        example: 15
+    FineId:
+      name: id
+      in: path
+      required: true
+      description: Идентификатор штрафа
+      schema:
+        type: integer
+        format: int64
+        example: 4
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Номер страницы (начиная с 1)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Количество элементов на странице
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Ошибка валидации входных данных
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: INVALID_INPUT
+            message: Поле email имеет неверный формат
+            timestamp: '2026-10-14T10:15:30Z'
+            details:
+              - field: email
+                message: must be a valid email
+    Unauthorized:
+      description: Пользователь не аутентифицирован (нет токена или он невалиден)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: UNAUTHORIZED
+            message: Токен отсутствует или истек срок его действия
+            timestamp: '2026-10-14T10:15:30Z'
+    Forbidden:
+      description: Недостаточно прав для выполнения действия
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: FORBIDDEN
+            message: Действие доступно только библиотекарю
+            timestamp: '2026-10-14T10:15:30Z'
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: NOT_FOUND
+            message: Книга с id=42 не найдена
+            timestamp: '2026-10-14T10:15:30Z'
+    Conflict:
+      description: Конфликт состояния ресурса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: CONFLICT
+            message: Операция невозможна в текущем состоянии ресурса
+            timestamp: '2026-10-14T10:15:30Z'
+
+  schemas:
+    # ---------- Auth / Users ----------
+    RegisterRequest:
+      type: object
+      required: [first_name, last_name, email, password]
+      properties:
+        first_name:
+          type: string
+          maxLength: 100
+          example: Иван
+        last_name:
+          type: string
+          maxLength: 100
+          example: Иванов
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          example: ivanov@mail.ru
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: Str0ngPass!
+        phone:
+          type: string
+          maxLength: 30
+          nullable: true
+          example: '+7 978 123-45-67'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: ivanov@mail.ru
+        password:
+          type: string
+          format: password
+          example: Str0ngPass!
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Время жизни токена в секундах
+          example: 3600
+        user:
+          $ref: '#/components/schemas/UserResponse'
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        first_name:
+          type: string
+          example: Иван
+        last_name:
+          type: string
+          example: Иванов
+        email:
+          type: string
+          format: email
+          example: ivanov@mail.ru
+        phone:
+          type: string
+          nullable: true
+          example: '+7 978 123-45-67'
+        role:
+          type: string
+          enum: [reader, librarian]
+          example: reader
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-01T09:00:00Z'
+
+    # ---------- Authors ----------
+    AuthorRequest:
+      type: object
+      required: [first_name, last_name]
+      properties:
+        first_name:
+          type: string
+          maxLength: 100
+          example: Михаил
+        last_name:
+          type: string
+          maxLength: 100
+          example: Булгаков
+        biography:
+          type: string
+          nullable: true
+          example: Русский писатель, драматург.
+
+    AuthorResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 5
+        first_name:
+          type: string
+          example: Михаил
+        last_name:
+          type: string
+          example: Булгаков
+        biography:
+          type: string
+          nullable: true
+
+    # ---------- Books ----------
+    BookRequest:
+      type: object
+      required: [title, author_ids]
+      properties:
+        title:
+          type: string
+          maxLength: 500
+          example: Мастер и Маргарита
+        isbn:
+          type: string
+          maxLength: 20
+          example: '978-5-17-090630-7'
+        publication_year:
+          type: integer
+          minimum: 1450
+          maximum: 2100
+          example: 2019
+        publisher:
+          type: string
+          maxLength: 255
+          example: АСТ
+        description:
+          type: string
+          nullable: true
+          example: Роман о визите дьявола в Москву 1930-х годов.
+        author_ids:
+          type: array
+          description: Идентификаторы авторов (связь N:M через book_authors)
+          minItems: 1
+          items:
+            type: integer
+            format: int64
+          example: [5]
+
+    BookResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 42
+        title:
+          type: string
+          example: Мастер и Маргарита
+        isbn:
+          type: string
+          example: '978-5-17-090630-7'
+        publication_year:
+          type: integer
+          example: 2019
+        publisher:
+          type: string
+          example: АСТ
+        description:
+          type: string
+          nullable: true
+        authors:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthorResponse'
+        total_copies:
+          type: integer
+          description: Всего физических экземпляров
+          example: 4
+        available_copies:
+          type: integer
+          description: Свободных экземпляров
+          example: 2
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-09-20T12:00:00Z'
+
+    BookPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookResponse'
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 137
+
+    # ---------- Copies ----------
+    CopyStatus:
+      type: string
+      enum: [available, reserved, loaned, lost, written_off]
+      example: available
+
+    CopyRequest:
+      type: object
+      required: [inventory_number]
+      properties:
+        inventory_number:
+          type: string
+          maxLength: 50
+          example: INV-000123
+        acquired_at:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-09-01'
+
+    CopyStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/CopyStatus'
+
+    CopyResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 7
+        book_id:
+          type: integer
+          format: int64
+          example: 42
+        inventory_number:
+          type: string
+          example: INV-000123
+        status:
+          $ref: '#/components/schemas/CopyStatus'
+        acquired_at:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-09-01'
+
+    # ---------- Reservations ----------
+    ReservationStatus:
+      type: string
+      enum: [active, completed, cancelled, expired]
+      example: active
+
+    ReservationRequest:
+      type: object
+      required: [copy_id]
+      properties:
+        copy_id:
+          type: integer
+          format: int64
+          example: 7
+
+    ReservationStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/ReservationStatus'
+
+    ReservationResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 3
+        copy_id:
+          type: integer
+          format: int64
+          example: 7
+        user_id:
+          type: integer
+          format: int64
+          example: 1
+        reserved_at:
+          type: string
+          format: date-time
+          example: '2026-10-14T10:00:00Z'
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-10-17T10:00:00Z'
+        status:
+          $ref: '#/components/schemas/ReservationStatus'
+
+    # ---------- Loans ----------
+    LoanRequest:
+      type: object
+      required: [copy_id, user_id, due_at]
+      properties:
+        copy_id:
+          type: integer
+          format: int64
+          example: 7
+        user_id:
+          type: integer
+          format: int64
+          example: 1
+        due_at:
+          type: string
+          format: date-time
+          description: Срок возврата
+          example: '2026-10-28T18:00:00Z'
+
+    LoanReturnRequest:
+      type: object
+      required: [returned_at]
+      properties:
+        returned_at:
+          type: string
+          format: date-time
+          example: '2026-10-27T15:30:00Z'
+
+    LoanResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 15
+        copy_id:
+          type: integer
+          format: int64
+          example: 7
+        user_id:
+          type: integer
+          format: int64
+          example: 1
+        issued_at:
+          type: string
+          format: date-time
+          example: '2026-10-14T11:00:00Z'
+        due_at:
+          type: string
+          format: date-time
+          example: '2026-10-28T18:00:00Z'
+        returned_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+
+    # ---------- Fines ----------
+    FinePaymentRequest:
+      type: object
+      required: [paid_at]
+      properties:
+        paid_at:
+          type: string
+          format: date-time
+          example: '2026-11-02T12:00:00Z'
+
+    FineResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 4
+        loan_id:
+          type: integer
+          format: int64
+          example: 15
+        user_id:
+          type: integer
+          format: int64
+          example: 1
+        amount:
+          type: number
+          format: double
+          example: 150.00
+        reason:
+          type: string
+          example: Просрочка возврата на 3 дня
+        issued_at:
+          type: string
+          format: date-time
+          example: '2026-10-31T09:00:00Z'
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+
+    # ---------- Errors ----------
+    ErrorResponse:
+      type: object
+      required: [code, message, timestamp]
+      properties:
+        code:
+          type: string
+          description: Машиночитаемый код ошибки
+          example: INVALID_INPUT
+        message:
+          type: string
+          description: Понятное человеку описание ошибки
+          example: Поле publication_year не может быть больше 2100
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-14T10:15:30Z'
+        details:
+          type: array
+          description: Ошибки по отдельным полям (для 400)
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: publication_year
+              message:
+                type: string
+                example: must be less than or equal to 2100
